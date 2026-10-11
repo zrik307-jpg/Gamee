@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Moonveil — 2D Platformer</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050914;font-family:system-ui,-apple-system,Segoe UI,sans-serif;touch-action:none}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#hud{position:fixed;left:16px;top:14px;color:#dce8ff;z-index:2;text-shadow:0 2px 8px #000;font-size:14px;letter-spacing:.04em;pointer-events:none}
+#hud .title{font-size:11px;letter-spacing:.28em;color:#9eb7e8;margin-bottom:8px}
+#health{font-size:21px;letter-spacing:3px;color:#f2f5ff}
+#hint{position:fixed;top:16px;right:16px;color:#b7c8e8;font-size:12px;text-align:right;text-shadow:0 2px 8px #000;pointer-events:none}
+#touch{position:fixed;inset:auto 0 16px 0;display:flex;justify-content:space-between;align-items:end;padding:0 18px;z-index:3;pointer-events:none}
+.pad,.actions{display:flex;gap:10px;pointer-events:auto}
+.ctrl{width:58px;height:58px;border:1px solid #a9c7f55c;border-radius:18px;background:#14213b99;color:#e5efff;font-size:22px;box-shadow:inset 0 1px 0 #ffffff17,0 6px 18px #0005;backdrop-filter:blur(5px);user-select:none;-webkit-user-select:none;touch-action:none}
+.ctrl:active{background:#354c7399;transform:translateY(1px)}
+.ctrl.small{font-size:12px;letter-spacing:.05em}
+@media (hover:hover) and (pointer:fine){#touch{opacity:.38}#touch:hover{opacity:1}}
+#start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:5;background:radial-gradient(ellipse at 50% 60%,#243b65a8,#050914ee 72%);color:#e8efff;text-align:center;padding:24px}
+.panel{max-width:480px;padding:30px 26px;border:1px solid #9dbbe64a;border-radius:18px;background:#081121c9;box-shadow:0 20px 80px #0008}
+.panel h1{font-weight:500;letter-spacing:.28em;font-size:clamp(25px,5vw,42px);margin:0 0 8px}
+.panel p{line-height:1.55;color:#aebfdf;font-size:14px}
+#play{border:1px solid #b9d0f4aa;background:#243a60;color:#f1f6ff;border-radius:12px;padding:13px 28px;font-size:14px;letter-spacing:.12em;margin-top:8px}
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Moonveil 2D platformer"></canvas>
+<div id="hud"><div class="title">MOONVEIL · RUINS BELOW</div><div id="health">♥ ♥ ♥</div><div id="souls">SOUL  ◇ ◇ ◇</div></div>
+<div id="hint">A / D или ← / → — движение<br>Пробел / ↑ — прыжок · X — удар</div>
+<div id="touch">
+ <div class="pad"><button class="ctrl" data-key="left">←</button><button class="ctrl" data-key="right">→</button></div>
+ <div class="actions"><button class="ctrl" data-key="jump">↑</button><button class="ctrl small" data-key="attack">УДАР</button></div>
+</div>
+<div id="start"><div class="panel"><h1>MOONVEIL</h1><p>Оригинальный 2D-платформер с кинематографичным нарисованным фоном, холодным светом, туманом, платформами и боем. Для лучшего обзора поверни телефон горизонтально.</p><p>Управление: A/D или стрелки · Пробел — прыжок · X — удар. На телефоне используй кнопки снизу.</p><button id="play">НАЧАТЬ ПУТЕШЕСТВИЕ</button></div></div>
+<script>
+(()=>{
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d',{alpha:false});
+const sceneArt=new Image(); sceneArt.src='hallownest_scene.png';
+const healthEl=document.getElementById('health'),soulsEl=document.getElementById('souls');
+let W=innerWidth,H=innerHeight,DPR=1;
+function resize(){W=innerWidth;H=innerHeight;DPR=Math.min(devicePixelRatio||1,1.7);canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);ctx.setTransform(DPR,0,0,DPR,0,0)}
+addEventListener('resize',resize);resize();
+const keys={left:false,right:false,jump:false,attack:false};
+const world={width:3300,ground:0};
+const player={x:130,y:0,vx:0,vy:0,w:26,h:42,face:1,onGround:false,hp:3,soul:0,attack:0,inv:0,run:0,dead:false};
+let camera=0,started=false,elapsed=0,last=0,shake=0;
+const platforms=[
+{x:0,y:0,w:620,h:90},{x:690,y:-65,w:160,h:24},{x:930,y:-125,w:175,h:24},
+{x:1190,y:-50,w:220,h:26},{x:1480,y:-130,w:190,h:24},{x:1740,y:-65,w:210,h:26},
+{x:2050,y:-145,w:180,h:24},{x:2300,y:-70,w:240,h:26},{x:2660,y:-130,w:190,h:24},
+{x:2900,y:0,w:400,h:100}
+];
+const enemies=[
+{x:480,y:0,base:480,min:410,max:560,v:0.6,hp:2,alive:true,hit:0},
+{x:1030,y:-125,base:1030,min:950,max:1080,v:-.5,hp:2,alive:true,hit:0},
+{x:1850,y:-65,base:1850,min:1770,max:1920,v:.55,hp:3,alive:true,hit:0},
+{x:2420,y:-70,base:2420,min:2320,max:2500,v:-.7,hp:2,alive:true,hit:0}
+];
+const particles=[],motes=Array.from({length:95},()=>({x:Math.random()*3600,y:Math.random()*1200-600,r:Math.random()*1.7+.3,s:Math.random()*.35+.08,a:Math.random()*.6+.15}));
+function floorAt(x){let best=-Infinity;for(const p of platforms){if(x+player.w*.5>p.x&&x-player.w*.5<p.x+p.w&&p.y>=best)best=p.y}return best}
+function burst(x,y,n,color){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-.5)*4,vy:(Math.random()-.8)*-3,life:25+Math.random()*25,max:50,r:Math.random()*2+1,color})}
+function attack(){if(player.attack<=0){player.attack=13;player.soul=Math.min(3,player.soul+0.2);burst(player.x+player.face*22,player.y-22,7,'#dceaff')}}
+function hurt(){if(player.inv>0)return;player.hp--;player.inv=75;shake=9;burst(player.x,player.y-20,18,'#8aa9df');if(player.hp<=0){player.dead=true;setTimeout(()=>{player.x=130;player.y=0;player.vx=player.vy=0;player.hp=3;player.dead=false;camera=0},900)}}
+function keyMap(e,on){const k=e.key.toLowerCase();if(['arrowleft','arrowright','arrowup',' ','x','a','d','w'].includes(k))e.preventDefault();if(k==='arrowleft'||k==='a')keys.left=on;if(k==='arrowright'||k==='d')keys.right=on;if(k==='arrowup'||k==='w'||k===' ')keys.jump=on;if(k==='x'||k==='j')keys.attack=on}
+addEventListener('keydown',e=>{keyMap(e,true);if((e.key.toLowerCase()==='x'||e.key.toLowerCase()==='j')&&!e.repeat)attack()});
+addEventListener('keyup',e=>keyMap(e,false));
+document.querySelectorAll('[data-key]').forEach(b=>{const k=b.dataset.key;const down=e=>{e.preventDefault();keys[k]=true;if(k==='attack')attack()};const up=e=>{e.preventDefault();keys[k]=false};b.addEventListener('pointerdown',down);b.addEventListener('pointerup',up);b.addEventListener('pointercancel',up);b.addEventListener('lostpointercapture',up)});
+document.getElementById('play').addEventListener('click',()=>{started=true;document.getElementById('start').style.display='none';last=performance.now()});
+function drawBackground(t){
+  // Painted landscape artwork provides the detailed gothic environment; canvas overlays add motion.
+  const iw=sceneArt.naturalWidth||1536, ih=sceneArt.naturalHeight||1024;
+  const scale=Math.max(W/iw,H/ih);
+  const sw=W/scale, sh=H/scale;
+  const maxCropX=Math.max(0,iw-sw);
+  const cropX=maxCropX*(camera/Math.max(1,world.width-W))*.7;
+  const cropY=Math.max(0,(ih-sh)*.47);
+  ctx.fillStyle='#050914';ctx.fillRect(0,0,W,H);
+  if(sceneArt.complete&&sceneArt.naturalWidth){
+    ctx.drawImage(sceneArt,cropX,cropY,sw,sh,0,0,W,H);
+  } else {
+    const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#050914');sky.addColorStop(.55,'#14264a');sky.addColorStop(1,'#526f9e');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  }
+  // Atmospheric drifting fog, particles and a gentle cool light pulse.
+  for(let j=0;j<4;j++){
+    const yy=H*(.52+j*.13)+Math.sin(t*.00025+j)*18;
+    const mg=ctx.createLinearGradient(0,yy-45,0,yy+55);
+    mg.addColorStop(0,'#8cb7f000');mg.addColorStop(.5,`rgba(118,158,218,${.065-j*.01})`);mg.addColorStop(1,'#8cb7f000');
+    ctx.fillStyle=mg;ctx.fillRect(0,yy-45,W,100);
+  }
+  for(const m of motes){
+    const sx=(m.x-camera*.32+W*2)%(W+40)-20;
+    const sy=(m.y+Math.sin(t*.0004+m.x)*15+H*.18)%(H+20);
+    ctx.globalAlpha=m.a*(.65+.35*Math.sin(t*.001+m.x));
+    ctx.fillStyle='#d2e5ff';ctx.beginPath();ctx.arc(sx,sy,m.r,0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+function drawPlatform(p){
+ const x=p.x-camera,y=H*.72+p.y;
+ if(x+p.w<-80||x>W+80)return;
+ ctx.fillStyle='#050912';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+p.w,y);ctx.lineTo(x+p.w+15,y+85);ctx.lineTo(x-10,y+85);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#111b30';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+p.w,y);ctx.lineTo(x+p.w-8,y+14);ctx.lineTo(x+8,y+14);ctx.closePath();ctx.fill();
+ ctx.strokeStyle='#536b91';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+p.w,y);ctx.stroke();
+ for(let bx=x+7;bx<x+p.w-8;bx+=19){let hh=5+Math.abs(Math.sin(bx*.13))*5;ctx.fillStyle='#263957';ctx.beginPath();ctx.ellipse(bx,y+7,9,hh,0,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#405577';ctx.lineWidth=.7;ctx.stroke()}
+ // dangling roots
+ ctx.strokeStyle='#050912';ctx.lineWidth=3;for(let rx=x+25;rx<x+p.w;rx+=53){ctx.beginPath();ctx.moveTo(rx,y+13);ctx.quadraticCurveTo(rx-5,y+35,rx+Math.sin(rx)*8,y+44);ctx.stroke()}
+}
+function drawHero(t){
+ const x=player.x-camera,y=H*.72+player.y;ctx.save();ctx.translate(x,y);
+ if(player.inv>0&&Math.floor(t/65)%2===0)ctx.globalAlpha=.38;
+ // ground shadow
+ ctx.fillStyle='#02040b99';ctx.beginPath();ctx.ellipse(0,2,18,5,0,0,Math.PI*2);ctx.fill();
+ // cloak
+ ctx.fillStyle='#111827';ctx.strokeStyle='#060912';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-10,-25);ctx.quadraticCurveTo(-18,-16,-15,-4);ctx.lineTo(-9,-8);ctx.lineTo(-3,0);ctx.lineTo(4,-7);ctx.lineTo(13,-2);ctx.quadraticCurveTo(17,-20,9,-26);ctx.closePath();ctx.fill();ctx.stroke();
+ // little feet
+ ctx.fillStyle='#080d18';ctx.beginPath();ctx.ellipse(-5,-3,5,3,0,0,Math.PI*2);ctx.ellipse(6,-3,5,3,0,0,Math.PI*2);ctx.fill();
+ // pale mask/head
+ ctx.fillStyle='#e7efff';ctx.strokeStyle='#080d18';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-12,-27);ctx.quadraticCurveTo(-17,-40,-10,-48);ctx.lineTo(-6,-57);ctx.lineTo(-1,-46);ctx.quadraticCurveTo(2,-49,7,-47);ctx.lineTo(13,-56);ctx.lineTo(15,-42);ctx.quadraticCurveTo(17,-31,9,-26);ctx.quadraticCurveTo(0,-21,-12,-27);ctx.fill();ctx.stroke();
+ // eye
+ ctx.fillStyle='#060b17';ctx.beginPath();ctx.ellipse(player.face*5,-35,3.3,5.1,0,0,Math.PI*2);ctx.fill();
+ // attack slash
+ if(player.attack>0){ctx.strokeStyle='#dceaff';ctx.lineWidth=3;ctx.shadowColor='#9bc8ff';ctx.shadowBlur=15;ctx.beginPath();let a=player.face===1?-.9:Math.PI-.9;ctx.arc(player.face*12,-24,23,a,a+1.7,player.face<0);ctx.stroke();ctx.shadowBlur=0}
+ ctx.restore();
+}
+function drawEnemy(e,t){
+ if(!e.alive)return;const x=e.x-camera,y=H*.72+e.y;if(x<-50||x>W+50)return;
+ ctx.save();ctx.translate(x,y);if(e.hit>0)ctx.globalAlpha=.5;
+ ctx.fillStyle='#050914';ctx.strokeStyle='#070b14';ctx.lineWidth=3;
+ ctx.beginPath();ctx.ellipse(0,-17,16,19,0,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#a9bad9';ctx.beginPath();ctx.moveTo(-14,-23);ctx.lineTo(-18,-37);ctx.lineTo(-7,-30);ctx.lineTo(2,-36);ctx.lineTo(12,-29);ctx.lineTo(15,-17);ctx.quadraticCurveTo(0,-7,-14,-23);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#070c18';ctx.beginPath();ctx.ellipse(5,-20,2.7,4,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#080d18';ctx.fillRect(-10,-5,7,7);ctx.fillRect(5,-5,7,7);
+ ctx.restore();
+}
+function update(dt,t){
+ elapsed+=dt;const step=Math.min(dt/16.667,2);
+ if(keys.left){player.vx-=.58*step;player.face=-1}if(keys.right){player.vx+=.58*step;player.face=1}
+ player.vx*=Math.pow(player.onGround?.78:.92,step);player.vx=Math.max(-4.4,Math.min(4.4,player.vx));
+ if(keys.jump&&player.onGround){player.vy=-10.5;player.onGround=false;burst(player.x,player.y-3,6,'#8daedc')}
+ player.vy+=.48*step;player.vy=Math.min(player.vy,12);
+ let oldY=player.y;player.x+=player.vx*step;player.x=Math.max(15,Math.min(world.width-20,player.x));
+ player.y+=player.vy*step;player.onGround=false;
+ for(const p of platforms){if(player.x+8>p.x&&player.x-8<p.x+p.w&&oldY>=p.y&&player.y<=p.y&&player.vy<=0){player.y=p.y;player.vy=0;player.onGround=true}}
+ if(player.y < -600){player.y=0;player.vy=0;hurt()}
+ if(player.attack>0){player.attack-=step;if(player.attack>4){for(const e of enemies){if(e.alive&&Math.abs(e.x-(player.x+player.face*29))<36&&Math.abs(e.y-player.y)<48&&e.hit<=0){e.hp--;e.hit=18;burst(e.x,e.y-20,12,'#b8d6ff');if(e.hp<=0){e.alive=false;player.soul=Math.min(3,player.soul+.6);burst(e.x,e.y-15,18,'#d7e8ff')}}}}}
+ if(player.inv>0)player.inv-=step;
+ for(const e of enemies){if(!e.alive)continue;e.x+=e.v*step;if(e.x<e.min||e.x>e.max)e.v*=-1;if(e.hit>0)e.hit-=step;if(Math.abs(e.x-player.x)<27&&Math.abs(e.y-player.y)<43)hurt()}
+ for(let i=particles.length-1;i>=0;i--){let p=particles[i];p.x+=p.vx*step;p.y+=p.vy*step;p.vy+=.08*step;p.life-=step;if(p.life<=0)particles.splice(i,1)}
+ camera=Math.max(0,Math.min(world.width-W,player.x-W*.37));
+ healthEl.textContent='♥ '.repeat(Math.max(0,player.hp)).trim()||'—';soulsEl.textContent='SOUL  '+Array.from({length:3},(_,i)=>i<Math.floor(player.soul)?'◆':'◇').join(' ');
+}
+function render(t){
+ ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);
+ if(shake>0){ctx.save();ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);shake*=.82;if(shake<.3)shake=0}
+ drawBackground(t);
+ for(const p of platforms)drawPlatform(p);
+ // decorative lamps
+ for(let lx=240;lx<world.width;lx+=410){let x=lx-camera;if(x<-30||x>W+30)continue;let y=H*.72-3;ctx.strokeStyle='#111a2d';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x,y-10);ctx.lineTo(x,y-100);ctx.stroke();ctx.strokeStyle='#293d60';ctx.beginPath();ctx.arc(x,y-104,9,0,Math.PI*2);ctx.stroke();let g=ctx.createRadialGradient(x,y-104,1,x,y-104,48);g.addColorStop(0,'#f0dcbf77');g.addColorStop(1,'#f0dcbf00');ctx.fillStyle=g;ctx.fillRect(x-48,y-152,96,96);ctx.fillStyle='#f5e4c9';ctx.beginPath();ctx.arc(x,y-104,3,0,Math.PI*2);ctx.fill()}
+ for(const e of enemies)drawEnemy(e,t);drawHero(t);
+ for(const p of particles){ctx.globalAlpha=Math.max(0,p.life/p.max);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x-camera,H*.72+p.y,p.r,0,Math.PI*2);ctx.fill()}ctx.globalAlpha=1;
+ // subtle vignette
+ const vg=ctx.createRadialGradient(W*.5,H*.48,H*.2,W*.5,H*.5,H*.78);vg.addColorStop(0,'#00000000');vg.addColorStop(1,'#02040bcc');ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+ if(shake>0)ctx.restore();
+}
+function frame(t){const dt=last?Math.min(40,t-last):16.667;last=t;if(started&&!player.dead)update(dt,t);render(t);requestAnimationFrame(frame)}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
